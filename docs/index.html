@@ -637,7 +637,7 @@
       consentInput.id = "consent";
       consentInput.className = "mr-2";
       const consentLabel = document.createElement("label");
-      consentLabel.textContent = "Acepto el procesamiento de mis datos (Ley 25.326)";
+      consentLabel.textContent = "Acepto los datos";
       consentLabel.className = "text-sm text-gray-600";
       consentDiv.appendChild(consentInput);
       consentDiv.appendChild(consentLabel);
@@ -654,7 +654,7 @@
     // Formalize complaint
     function formalizeComplaint() {
       if (!document.getElementById("consent").checked) {
-        alert("Por favor, aceptá el procesamiento de datos.");
+        alert("Por favor, aceptá los datos.");
         return;
       }
       const formalizedText = `
