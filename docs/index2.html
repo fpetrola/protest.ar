@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Protest.ar</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .highlight-provider { background-color: #d1fae5; color: #065f46; padding: 2px 4px; border-radius: 4px; }
+    .highlight-issue { background-color: #fef9c3; color: #713f12; padding: 2px 4px; border-radius: 4px; }
+    .highlight-location { background-color: #dbeafe; color: #1e40af; padding: 2px 4px; border-radius: 4px; }
+    .highlight-date { background-color: #f3e8ff; color: #6b21a8; padding: 2px 4px; border-radius: 4px; }
+    .highlight-service { background-color: #fed7aa; color: #7c2d12; padding: 2px 4px; border-radius: 4px; }
+    .highlight-hospital { background-color: #fce7f3; color: #831843; padding: 2px 4px; border-radius: 4px; }
+    #complaintText { position: relative; white-space: pre-wrap; }
+    #complaintText::before {
+      content: "Escribe tu queja aquí...";
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      color: #9ca3af;
+      pointer-events: none;
+    }
+    #complaintText:empty::before { display: block; }
+    #complaintText:not(:empty)::before { display: none; }
+    .custom-input { display: none; }
+  </style>
+</head>
+<body class="min-h-screen bg-gray-100">
+  <!-- Header -->
+  <header class="bg-blue-600 text-white p-4 flex justify-between items-center">
+    <h1 class="text-xl font-bold">Protest.ar</h1>
+    <div class="flex items-center space-x-2">
+      <select id="exampleComplaints" class="p-2 border rounded-lg text-base bg-white text-gray-800">
+        <option value="">Seleccionar caso...</option>
+        <option value="Edenor cortó la luz en Avenida Corrientes 1234 el viernes 3 de julio">Electricidad: Corte de luz</option>
+        <option value="Hay un bache grave en Calle Florida 500 el 3/07">Baches: Bache grave</option>
+        <option value="El colectivo demoró en Palermo el 3 de julio">Transporte: Demora en colectivo</option>
+        <option value="Mala atención en el Hospital Italiano el viernes 3 de julio">Salud: Mala atención</option>
+      </select>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="p-4 max-w-2xl mx-auto">
+    <h2 class="text-lg font-bold mb-4">Ingresar una Queja</h2>
+    <div class="bg-white p-6 rounded-lg shadow-lg">
+      <div
+        id="complaintText"
+        contenteditable="true"
+        class="w-full p-2 border rounded mb-4 min-h-[100px] outline-none"
+      ></div>
+      <div id="formContainer" class="mt-6 bg-gray-50 p-4 rounded-lg shadow-inner">
+        <div id="ontologySelector" class="mb-4">
+          <label for="ontologySelect" class="text-lg font-semibold text-gray-700 mr-2">Seleccionar Categoría:</label>
+          <select id="ontologySelect" class="p-2 border rounded-lg text-base bg-white text-gray-800">
+            <option value="">Seleccionar categoría...</option>
+            <option value="electricidad">Electricidad</option>
+            <option value="baches">Baches</option>
+            <option value="transporte">Transporte</option>
+            <option value="salud">Salud</option>
+          </select>
+        </div>
+        <div id="formContent"></div>
+      </div>
+      <div id="formalizedComplaint" class="mt-6 text-gray-800 p-4 bg-white rounded-lg shadow"></div>
+    </div>
+  </main>
+
+  <script>
+    // Simulated user data for gamification
+    let userData = { points: 30, badges: ["Ciudadano Activo"] };
+    let complaintData = { category: "", entities: {}, originalText: "", taggedText: [], originalDateFormat: null };
+    let currentCategory = null;
+    let debounceTimeout = null;
+    let isEditingForm = false;
+
+    // Ontology definition
+    const ontology = {
+      "electricidad": {
+        fields: ["proveedor", "problema", "fecha", "ubicacion"],
+        labels: {
+          proveedor: "Proveedor de Electricidad",
+          problema: "Tipo de Problema",
+          fecha: "Fecha del Incidente",
+          ubicacion: "Ubicación"
+        },
+        options: {
+          proveedor: ["EDENOR", "EDESUR", "Otro"],
+          problema: ["Corte de luz", "Factura alta", "Mal servicio", "Otro"],
+          fecha: [],
+          ubicacion: []
+        },
+        keywords: {
+          proveedor: ["edenor", "edesur"],
+          problema: ["corte", "factura alta", "mal servicio"],
+          fecha: ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo", "hoy", "ayer"],
+          ubicacion: ["palermo", "recoleta", "belgrano", "caba", "avenida", "calle"]
+        },
+        highlightClass: {
+          proveedor: "highlight-provider",
+          problema: "highlight-issue",
+          fecha: "highlight-date",
+          ubicacion: "highlight-location"
+        }
+      },
+      "baches": {
+        fields: ["ubicacion", "gravedad", "fecha"],
+        labels: {
+          ubicacion: "Ubicación del Bache",
+          gravedad: "Gravedad",
+          fecha: "Fecha del Reporte"
+        },
+        options: {
+          ubicacion: [],
+          gravedad: ["Leve", "Moderado", "Grave", "Otro"],
+          fecha: []
+        },
+        keywords: {
+          ubicacion: ["palermo", "recoleta", "belgrano", "caba", "avenida", "calle"],
+          gravedad: ["leve", "moderado", "grave"],
+          fecha: ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo", "hoy", "ayer"]
+        },
+        highlightClass: {
+          ubicacion: "highlight-location",
+          gravedad: "highlight-issue",
+          fecha: "highlight-date"
+        }
+      },
+      "transporte": {
+        fields: ["servicio", "problema", "fecha", "ubicacion"],
+        labels: {
+          servicio: "Servicio de Transporte",
+          problema: "Tipo de Problema",
+          fecha: "Fecha del Incidente",
+          ubicacion: "Ubicación"
+        },
+        options: {
+          servicio: ["Colectivo", "Tren", "Subte", "Otro"],
+          problema: ["Demora", "Mal estado", "Falta de servicio", "Otro"],
+          fecha: [],
+          ubicacion: []
+        },
+        keywords: {
+          servicio: ["colectivo", "tren", "subte"],
+          problema: ["demora", "mal estado", "falta de servicio"],
+          fecha: ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo", "hoy", "ayer"],
+          ubicacion: ["palermo", "recoleta", "belgrano", "caba", "avenida", "calle"]
+        },
+        highlightClass: {
+          servicio: "highlight-service",
+          problema: "highlight-issue",
+          fecha: "highlight-date",
+          ubicacion: "highlight-location"
+        }
+      },
+      "salud": {
+        fields: ["hospital", "problema", "fecha", "ubicacion"],
+        labels: {
+          hospital: "Hospital o Clínica",
+          problema: "Tipo de Problema",
+          fecha: "Fecha del Incidente",
+          ubicacion: "Ubicación"
+        },
+        options: {
+          hospital: ["Hospital Italiano", "Hospital Fernández", "Clínica Privada", "Otro"],
+          problema: ["Mala atención", "Falta de insumos", "Demora en turno", "Otro"],
+          fecha: [],
+          ubicacion: []
+        },
+        keywords: {
+          hospital: ["hospital italiano", "hospital fernández", "clínica"],
+          problema: ["mala atención", "falta de insumos", "demora en turno"],
+          fecha: ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo", "hoy", "ayer"],
+          ubicacion: ["palermo", "recoleta", "belgrano", "caba", "avenida", "calle"]
+        },
+        highlightClass: {
+          hospital: "highlight-hospital",
+          problema: "highlight-issue",
+          fecha: "highlight-date",
+          ubicacion: "highlight-location"
+        }
+      }
+    };
+
+    // Normalize date to DD-MM-YYYY
+    function normalizeDate(dateStr) {
+      const months = {
+        "enero": "01", "febrero": "02", "marzo": "03", "abril": "04", "mayo": "05", "junio": "06",
+        "julio": "07", "agosto": "08", "septiembre": "09", "octubre": "10", "noviembre": "11", "diciembre": "12"
+      };
+      const daysOfWeek = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+      const today = new Date();
+      const currentYear = today.getFullYear();
+      const regex1 = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/;
+      const regex2 = /(lunes|martes|miércoles|jueves|viernes|sábado|domingo)\s+(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})/i;
+      const regex3 = /(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)(\s+de\s+(\d{4}))?/i;
+      const regex4 = /^(\d{1,2})[\/-](\d{1,2})$/;
+      const regex5 = /\b(hoy|ayer)\b/i;
+
+      if (regex1.test(dateStr)) {
+        complaintData.originalDateFormat = "DD/MM/YYYY";
+        const [_, day, month, year] = dateStr.match(regex1);
+        return `${day.padStart(2, "0")}-${month.padStart(2, "0")}-${year}`;
+      } else if (regex2.test(dateStr)) {
+        complaintData.originalDateFormat = "Día DD de Mes de YYYY";
+        const [_, __, day, month, year] = dateStr.match(regex2);
+        return `${day.padStart(2, "0")}-${months[month.toLowerCase()]}-${year}`;
+      } else if (regex3.test(dateStr)) {
+        complaintData.originalDateFormat = "DD de Mes" + (dateStr.includes(" de ") ? " de YYYY" : "");
+        const match = dateStr.match(regex3);
+        const day = match[1];
+        const month = months[match[2].toLowerCase()];
+        const year = match[4] || currentYear;
+        return `${day.padStart(2, "0")}-${month}-${year}`;
+      } else if (regex4.test(dateStr)) {
+        complaintData.originalDateFormat = "DD/MM";
+        const [_, day, month] = dateStr.match(regex4);
+        return `${day.padStart(2, "0")}-${month.padStart(2, "0")}-${currentYear}`;
+      } else if (regex5.test(dateStr)) {
+        complaintData.originalDateFormat = dateStr.toLowerCase();
+        const isToday = dateStr.toLowerCase() === "hoy";
+        const date = isToday ? today : new Date(today.setDate(today.getDate() - 1));
+        const day = String(date.getDate()).padStart(2, "0");
+        const month = String(date.getMonth() + 1).padStart(2, "0");
+        const year = date.getFullYear();
+        return `${day}-${month}-${year}`;
+      }
+      return dateStr; // Fallback
+    }
+
+    // Denormalize date to original format
+    function denormalizeDate(normalizedDate, originalFormat) {
+      const months = {
+        "01": "enero", "02": "febrero", "03": "marzo", "04": "abril", "05": "mayo", "06": "junio",
+        "07": "julio", "08": "agosto", "09": "septiembre", "10": "octubre", "11": "noviembre", "12": "diciembre"
+      };
+      const daysOfWeek = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+      const [day, month, year] = normalizedDate.split("-").map(Number);
+      const dateObj = new Date(year, month - 1, day);
+      const dayOfWeek = daysOfWeek[dateObj.getDay()];
+
+      if (originalFormat === "DD/MM/YYYY") {
+        return `${day.toString().padStart(2, "0")}/${month.toString().padStart(2, "0")}/${year}`;
+      } else if (originalFormat === "Día DD de Mes de YYYY") {
+        return `${dayOfWeek} ${day} de ${months[month.toString().padStart(2, "0")]} de ${year}`;
+      } else if (originalFormat === "DD de Mes de YYYY") {
+        return `${day} de ${months[month.toString().padStart(2, "0")]} de ${year}`;
+      } else if (originalFormat === "DD de Mes") {
+        return `${day} de ${months[month.toString().padStart(2, "0")]}`;
+      } else if (originalFormat === "DD/MM") {
+        return `${day.toString().padStart(2, "0")}/${month.toString().padStart(2, "0")}`;
+      } else if (originalFormat === "hoy" && day === new Date().getDate() && month === new Date().getMonth() + 1 && year === new Date().getFullYear()) {
+        return "hoy";
+      } else if (originalFormat === "ayer") {
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        if (day === yesterday.getDate() && month === yesterday.getMonth() + 1 && year === yesterday.getFullYear()) {
+          return "ayer";
+        }
+      }
+      return `${dayOfWeek} ${day} de ${months[month.toString().padStart(2, "0")]} de ${year}`; // Fallback: legible format
+    }
+
+    // Get cursor position
+    function getCursorPosition(element) {
+      const selection = window.getSelection();
+      if (selection.rangeCount === 0) return { position: null, range: null };
+      const range = selection.getRangeAt(0);
+      const preCaretRange = range.cloneRange();
+      preCaretRange.selectNodeContents(element);
+      preCaretRange.setEnd(range.endContainer, range.endOffset);
+      return { position: preCaretRange.toString().length, range };
+    }
+
+    // Set cursor position
+    function setCursorPosition(element, position) {
+      const range = document.createRange();
+      const selection = window.getSelection();
+      let charCount = 0, nodeStack = [element], node;
+
+      while (nodeStack.length > 0) {
+        node = nodeStack.pop();
+        if (node.nodeType === 3) {
+          const nextCharCount = charCount + node.length;
+          if (position >= charCount && position <= nextCharCount) {
+            range.setStart(node, position - charCount);
+            range.setEnd(node, position - charCount);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            return;
+          }
+          charCount = nextCharCount;
+        } else {
+          for (let i = node.childNodes.length - 1; i >= 0; i--) {
+            nodeStack.push(node.childNodes[i]);
+          }
+        }
+      }
+      range.selectNodeContents(element);
+      range.collapse(false);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+
+    // Analyze text for category and entities
+    function analyzeText(text, selectedCategory = null) {
+      const keywords = {
+        "luz": "electricidad",
+        "electricidad": "electricidad",
+        "corte": "electricidad",
+        "edenor": "electricidad",
+        "edesur": "electricidad",
+        "bache": "baches",
+        "calle": "baches",
+        "avenida": "baches",
+        "colectivo": "transporte",
+        "tren": "transporte",
+        "subte": "transporte",
+        "demora": "transporte",
+        "hospital": "salud",
+        "clínica": "salud",
+        "atención": "salud",
+        "insumos": "salud",
+        "turno": "salud"
+      };
+      let bestCategory = null;
+      let maxMatches = 0;
+
+      if (!selectedCategory) {
+        for (const [keyword, category] of Object.entries(keywords)) {
+          if (text.toLowerCase().includes(keyword)) {
+            const matches = (text.toLowerCase().match(new RegExp(`\\b${keyword}\\b`, "g")) || []).length;
+            if (matches > maxMatches) {
+              maxMatches = matches;
+              bestCategory = category;
+            }
+          }
+        }
+      } else {
+        bestCategory = selectedCategory;
+      }
+
+      const ontologySelect = document.getElementById("ontologySelect");
+      if (bestCategory) {
+        currentCategory = bestCategory;
+        complaintData.entities = {};
+        complaintData.taggedText = [];
+        complaintData.originalDateFormat = null;
+        extractEntities(text, bestCategory);
+        ontologySelect.value = bestCategory;
+        generateForm();
+        return complaintData.entities;
+      } else {
+        currentCategory = null;
+        complaintData.entities = {};
+        complaintData.taggedText = [];
+        complaintData.originalDateFormat = null;
+        ontologySelect.value = "";
+        document.getElementById("formContent").innerHTML = "<p class='text-gray-600'>Escribe más detalles o selecciona una categoría.</p>";
+        return null;
+      }
+    }
+
+    // Extract entities based on category
+    function extractEntities(text, category) {
+      const entities = {};
+      const taggedText = [];
+      const lowerText = text.toLowerCase();
+
+      // Detect date
+      const dateRegexes = [
+        /(lunes|martes|miércoles|jueves|viernes|sábado|domingo)\s+(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+de\s+(\d{4})/gi,
+        /(\d{1,2})\s+de\s+(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)(\s+de\s+(\d{4}))?/gi,
+        /(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/g,
+        /(\d{1,2})[\/-](\d{1,2})/g,
+        /\b(hoy|ayer)\b/gi
+      ];
+      for (const regex of dateRegexes) {
+        const dateMatch = text.match(regex);
+        if (dateMatch) {
+          const normalizedDate = normalizeDate(dateMatch[0]);
+          entities.fecha = normalizedDate;
+          taggedText.push({ keyword: dateMatch[0], field: "fecha", entity: normalizedDate });
+          break;
+        }
+      }
+
+      // Detect location
+      const locationKeywords = ontology[category].keywords.ubicacion || [];
+      let location = null;
+      for (const keyword of locationKeywords) {
+        const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "gi");
+        if (lowerText.match(regex)) {
+          const match = text.match(new RegExp(`\\b${keyword}\\b`, "i"));
+          if (match) {
+            location = match[0];
+            break;
+          }
+        }
+      }
+      if (!location) {
+        const locationRegex = /(avenida|calle)\s+[A-Za-z\s]+\s*\d*/gi;
+        const locationMatch = text.match(locationRegex);
+        if (locationMatch) {
+          location = locationMatch[0].trim();
+        }
+      }
+      if (location) {
+        entities.ubicacion = location;
+        taggedText.push({ keyword: location, field: "ubicacion", entity: location });
+      }
+
+      // Detect hospital for salud category
+      if (category === "salud") {
+        const hospitalKeywords = ontology.salud.options.hospital.map(opt => opt.toLowerCase());
+        for (const hospital of hospitalKeywords) {
+          const regex = new RegExp(`\\b${hospital.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, "gi");
+          if (lowerText.match(regex)) {
+            const match = text.match(new RegExp(`\\b${hospital}\\b`, "i"));
+            if (match) {
+              entities.hospital = ontology.salud.options.hospital.find(opt => opt.toLowerCase() === hospital) || match[0];
+              taggedText.push({ keyword: match[0], field: "hospital", entity: entities.hospital });
+              break;
+            }
+          }
+        }
+      }
+
+      // Detect other fields
+      ontology[category].fields.forEach(field => {
+        if (field !== "fecha" && field !== "ubicacion" && field !== "hospital" && ontology[category].keywords[field]) {
+          const matchedKeyword = ontology[category].keywords[field].find(keyword => lowerText.includes(keyword));
+          if (matchedKeyword) {
+            const entity = ontology[category].options[field]?.find(opt => opt.toLowerCase() === matchedKeyword) || matchedKeyword;
+            entities[field] = entity;
+            taggedText.push({ keyword: matchedKeyword, field, entity });
+          }
+        }
+      });
+
+      complaintData.entities = entities;
+      complaintData.taggedText = taggedText;
+      return entities;
+    }
+
+    // Update text from form changes
+    function updateTextFromForm(changedField, newValue, activeElement) {
+      isEditingForm = true;
+      const complaintText = document.getElementById("complaintText");
+      let text = complaintData.originalText;
+
+      if (changedField === "fecha") {
+        const oldDate = complaintData.taggedText.find(tag => tag.field === "fecha");
+        const newDateText = denormalizeDate(newValue, complaintData.originalDateFormat);
+        if (oldDate) {
+          const escapedKeyword = oldDate.keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(`\\b${escapedKeyword}\\b`, "gi");
+          text = text.replace(regex, newDateText);
+        } else if (text.trim()) {
+          text += ` ${newDateText}`;
+        } else {
+          text = newDateText;
+        }
+        complaintData.entities.fecha = newValue;
+        complaintData.taggedText = complaintData.taggedText.filter(tag => tag.field !== "fecha");
+        complaintData.taggedText.push({ keyword: newDateText, field: "fecha", entity: newValue });
+      } else {
+        const oldEntity = complaintData.taggedText.find(tag => tag.field === changedField);
+        if (oldEntity) {
+          const escapedKeyword = oldEntity.keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(`\\b${escapedKeyword}\\b`, "gi");
+          text = text.replace(regex, newValue);
+        } else if (text.trim()) {
+          text += ` ${newValue}`;
+        } else {
+          text = newValue;
+        }
+        complaintData.entities[changedField] = newValue;
+        complaintData.taggedText = complaintData.taggedText.filter(tag => tag.field !== changedField);
+        complaintData.taggedText.push({ keyword: newValue, field: changedField, entity: newValue });
+      }
+
+      complaintData.originalText = text;
+      updateTextHighlight(activeElement);
+      isEditingForm = false;
+    }
+
+    // Debounce function
+    function debounce(func, wait) {
+      return function executedFunction(...args) {
+        clearTimeout(debounceTimeout);
+        debounceTimeout = setTimeout(() => func.apply(this, args), wait);
+      };
+    }
+
+    // Update text with highlights
+    function updateTextHighlight(activeElement) {
+      const complaintText = document.getElementById("complaintText");
+      const { position: cursorPosition } = isEditingForm ? { position: null } : getCursorPosition(complaintText);
+      let text = complaintData.originalText;
+
+      if (currentCategory) {
+        complaintData.taggedText.forEach(({ keyword, field, entity }) => {
+          const highlightClass = ontology[currentCategory].highlightClass[field];
+          const escapedKeyword = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          const regex = new RegExp(`\\b${escapedKeyword}\\b`, "gi");
+          text = text.replace(regex, `<span class="${highlightClass}" title="${ontology[currentCategory].labels[field]}: ${entity}">${keyword}</span>`);
+        });
+      }
+
+      complaintText.innerHTML = text;
+      if (cursorPosition !== null) {
+        setCursorPosition(complaintText, cursorPosition);
+      }
+
+      if (isEditingForm) {
+        updateFormValues(activeElement);
+      } else {
+        generateForm();
+      }
+    }
+
+    // Update form values without recreating DOM
+    function updateFormValues(activeElement) {
+      if (!currentCategory) return;
+      const formContent = document.getElementById("formContent");
+      if (!formContent.querySelector("form")) {
+        generateForm();
+        return;
+      }
+
+      const categoryLabel = formContent.querySelector("p");
+      if (categoryLabel) {
+        categoryLabel.textContent = `Categoría detectada: ${currentCategory.charAt(0).toUpperCase() + currentCategory.slice(1)}`;
+      }
+
+      ontology[currentCategory].fields.forEach(field => {
+        const select = formContent.querySelector(`select[name="${field}"]`);
+        const input = formContent.querySelector(`input[name="${field}"]`);
+        const customInput = formContent.querySelector(`input[name="${field}_custom"]`);
+
+        if (select) {
+          const currentValue = complaintData.entities[field] || "";
+          if (ontology[currentCategory].options[field].includes(currentValue)) {
+            select.value = currentValue;
+            if (customInput) customInput.classList.add("custom-input");
+          } else {
+            select.value = "Otro";
+            if (customInput) {
+              customInput.classList.remove("custom-input");
+              customInput.value = currentValue;
+            }
+          }
+        } else if (input) {
+          input.value = complaintData.entities[field] || "";
+        }
+      });
+
+      if (activeElement) {
+        activeElement.focus();
+      }
+    }
+
+    // Generate dynamic form
+    function generateForm() {
+      const formContent = document.getElementById("formContent");
+      formContent.innerHTML = "";
+      if (!currentCategory) {
+        formContent.innerHTML = "<p class='text-gray-600'>Escribe más detalles o selecciona una categoría.</p>";
+        return;
+      }
+
+      const form = document.createElement("form");
+      form.className = "space-y-4";
+      form.innerHTML = `<p class="text-lg font-semibold text-gray-700">Categoría detectada: ${currentCategory.charAt(0).toUpperCase() + currentCategory.slice(1)}</p>`;
+      ontology[currentCategory].fields.forEach(field => {
+        const div = document.createElement("div");
+        div.className = "flex flex-col";
+        const label = document.createElement("label");
+        label.textContent = ontology[currentCategory].labels[field];
+        label.className = "text-lg font-semibold text-gray-700 mb-1";
+        if (ontology[currentCategory].options[field]?.length > 0) {
+          const select = document.createElement("select");
+          select.name = field;
+          select.className = "p-3 border rounded-lg text-base focus:ring-2 focus:ring-blue-500";
+          select.onchange = () => {
+            const customInput = div.querySelector(`[name="${field}_custom"]`);
+            if (select.value === "Otro") {
+              customInput.classList.remove("custom-input");
+              customInput.value = complaintData.entities[field] && !ontology[currentCategory].options[field].includes(complaintData.entities[field]) ? complaintData.entities[field] : "";
+            } else {
+              customInput.classList.add("custom-input");
+              updateTextFromForm(field, select.value, select);
+            }
+          };
+          ontology[currentCategory].options[field].forEach(option => {
+            const opt = document.createElement("option");
+            opt.value = option;
+            opt.textContent = option;
+            if (complaintData.entities[field] === option) opt.selected = true;
+            select.appendChild(opt);
+          });
+          const customInput = document.createElement("input");
+          customInput.type = "text";
+          customInput.name = `${field}_custom`;
+          customInput.className = "custom-input p-3 border rounded-lg text-base mt-2";
+          customInput.oninput = () => {
+            updateTextFromForm(field, customInput.value, customInput);
+          };
+          if (complaintData.entities[field] && !ontology[currentCategory].options[field].includes(complaintData.entities[field])) {
+            select.value = "Otro";
+            customInput.classList.remove("custom-input");
+            customInput.value = complaintData.entities[field];
+          }
+          div.appendChild(label);
+          div.appendChild(select);
+          div.appendChild(customInput);
+        } else {
+          const input = document.createElement("input");
+          input.type = "text";
+          input.name = field;
+          input.className = "p-3 border rounded-lg text-base focus:ring-2 focus:ring-blue-500";
+          input.value = complaintData.entities[field] || "";
+          input.oninput = () => {
+            updateTextFromForm(field, input.value, input);
+          };
+          div.appendChild(label);
+          div.appendChild(input);
+        }
+        form.appendChild(div);
+      });
+      const consentDiv = document.createElement("div");
+      consentDiv.className = "flex items-center";
+      const consentInput = document.createElement("input");
+      consentInput.type = "checkbox";
+      consentInput.id = "consent";
+      consentInput.className = "mr-2";
+      const consentLabel = document.createElement("label");
+      consentLabel.textContent = "Acepto los datos";
+      consentLabel.className = "text-sm text-gray-600";
+      consentDiv.appendChild(consentInput);
+      consentDiv.appendChild(consentLabel);
+      form.appendChild(consentDiv);
+      const submitButton = document.createElement("button");
+      submitButton.type = "button";
+      submitButton.className = "bg-green-600 text-white px-6 py-3 rounded-lg w-full text-lg font-semibold hover:bg-green-700";
+      submitButton.textContent = "Ingresar Queja";
+      submitButton.onclick = () => formalizeComplaint();
+      form.appendChild(submitButton);
+      formContent.appendChild(form);
+    }
+
+    // Formalize complaint
+    function formalizeComplaint() {
+      if (!document.getElementById("consent").checked) {
+        alert("Por favor, aceptá los datos.");
+        return;
+      }
+      const formalizedText = `
+        <p class="text-lg font-bold">Queja Formalizada:</p>
+        <p><strong>Categoría:</strong> ${currentCategory.charAt(0).toUpperCase() + currentCategory.slice(1)}</p>
+        ${ontology[currentCategory].fields.map(field => `
+          <p><strong>${ontology[currentCategory].labels[field]}:</strong> ${complaintData.entities[field] || "No especificado"}</p>
+        `).join("")}
+      `;
+      document.getElementById("formalizedComplaint").innerHTML = formalizedText;
+      userData.points += 10;
+      document.getElementById("userPoints").textContent = `${userData.points} Puntos`;
+    }
+
+    // Analyze text live with debounce
+    const analyzeTextLive = debounce(() => {
+      const complaintText = document.getElementById("complaintText");
+      complaintData.originalText = complaintText.innerText;
+      const ontologySelect = document.getElementById("ontologySelect");
+      const selectedCategory = ontologySelect.value;
+      const entities = analyzeText(complaintData.originalText, selectedCategory || null);
+      updateTextHighlight();
+    }, 150);
+
+    // Initialize event listeners
+    const complaintText = document.getElementById("complaintText");
+    complaintText.addEventListener("input", analyzeTextLive);
+    complaintText.addEventListener("focus", () => {
+      if (complaintText.innerText === "Escribe tu queja aquí...") {
+        complaintText.innerText = "";
+      }
+    });
+
+    // Handle example complaints selection
+    const exampleComplaints = document.getElementById("exampleComplaints");
+    exampleComplaints.addEventListener("change", () => {
+      const selectedText = exampleComplaints.value;
+      if (selectedText) {
+        complaintText.innerText = selectedText;
+        complaintData.originalText = selectedText;
+        const ontologySelect = document.getElementById("ontologySelect");
+        ontologySelect.value = "";
+        analyzeText(selectedText);
+        updateTextHighlight();
+      }
+    });
+
+    // Handle ontology selection
+    const ontologySelect = document.getElementById("ontologySelect");
+    ontologySelect.addEventListener("change", () => {
+      const selectedCategory = ontologySelect.value;
+      if (selectedCategory) {
+        currentCategory = selectedCategory;
+        complaintData.entities = {};
+        complaintData.taggedText = [];
+        complaintData.originalDateFormat = null;
+        extractEntities(complaintData.originalText, selectedCategory);
+        generateForm();
+        updateTextHighlight();
+      } else {
+        currentCategory = null;
+        document.getElementById("formContent").innerHTML = "<p class='text-gray-600'>Escribe más detalles o selecciona una categoría.</p>";
+      }
+    });
+  </script>
+</body>
+</html>
